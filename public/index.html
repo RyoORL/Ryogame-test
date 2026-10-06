@@ -53,19 +53,27 @@ const $=s=>document.querySelector(s);
 let ws,myId,myRoom,state;
 const faces=["","⚀","⚁","⚂","⚃","⚄","⚅"];
 
-function connect(){
-  ws=new WebSocket(location.origin.replace(/^http/,"ws"));
+function connect(firstMessage){
+  if(ws && ws.readyState===1){ ws.send(JSON.stringify(firstMessage)); return; }
+  if(ws && ws.readyState===0){ ws._pendingMessage=firstMessage; return; }
+  const protocol=location.protocol==="https:"?"wss:":"ws:";
+  ws=new WebSocket(`${protocol}//${location.host}`);
+  ws.onopen=()=>{
+    if(ws._pendingMessage){ ws.send(JSON.stringify(ws._pendingMessage)); ws._pendingMessage=null; }
+  };
   ws.onmessage=e=>{
     const m=JSON.parse(e.data);
     if(m.type==="error") $("#err").textContent=m.message;
-    if(m.type==="state"){state=m.state;myRoom=m.state.code;render();}
+    if(m.type==="state"){state=m.state;myRoom=m.state.code;if(m.selfId)myId=m.selfId;render();}
   };
+  ws.onerror=()=>$("#err").textContent="เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองรีเฟรชหน้า";
   ws.onclose=()=>$("#err").textContent="การเชื่อมต่อหลุด ลองรีเฟรชหน้า";
+  if(ws.readyState===0) ws._pendingMessage=firstMessage;
 }
-function send(o){if(ws?.readyState===1)ws.send(JSON.stringify(o))}
+function send(o){if(ws?.readyState===1)ws.send(JSON.stringify(o));else if(ws?.readyState===0)ws._pendingMessage=o}
 function name(){return $("#name").value.trim()||"ผู้เล่น"}
-$("#create").onclick=()=>{connect();setTimeout(()=>send({type:"create",name:name()}),150)};
-$("#join").onclick=()=>{connect();setTimeout(()=>send({type:"join",code:$("#code").value,name:name()}),150)};
+$("#create").onclick=()=>connect({type:"create",name:name()});
+$("#join").onclick=()=>connect({type:"join",code:$("#code").value,name:name()});
 $("#flip").onclick=()=>send({type:"flip"});
 $("#shake").onclick=()=>send({type:"shake"});
 
