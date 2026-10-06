@@ -1,1 +1,113 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dice Bluff</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#10131a;color:#f4f6fa}
+.wrap{max-width:1050px;margin:auto;padding:18px}.panel{background:#181d27;border:1px solid #303847;border-radius:16px;padding:16px}
+button,input{font:inherit;border-radius:10px;border:1px solid #3a4352;padding:11px 13px}
+button{cursor:pointer;background:#5267ff;color:white;border:0}.secondary{background:#293140}.danger{background:#a93636}
+input{background:#10141c;color:white;width:100%}.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1}
+.hidden{display:none}.muted{color:#aeb6c5}.players{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:12px 0}
+.playerCard{padding:10px;border:1px solid #303847;border-radius:12px}.me{outline:2px solid #5267ff}
+.board{position:relative;min-height:430px;border-radius:22px;border:3px solid #667085;background:#283322;overflow:hidden;margin-top:12px;touch-action:none}
+.board.down{background:#17202b}
+.die{position:absolute;width:58px;height:58px;transform:translate(-50%,-50%);background:white;color:#111;border-radius:12px;display:grid;place-items:center;font-size:28px;font-weight:800;box-shadow:0 5px 14px #0007;cursor:grab;user-select:none;touch-action:none}
+.cover{position:absolute;inset:0;display:grid;place-items:center;font-size:50px;background:#0b1119cc}
+small{display:block}.status{margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎲 Dice Bluff</h1>
+  <p class="muted">เกมเต๋าจับโกหกออนไลน์ • สูงสุด 6 คน • คนอื่นจะไม่เห็นลูกเต๋าเมื่อบอร์ดคว่ำ</p>
 
+  <section id="lobby" class="panel">
+    <div class="row">
+      <div><label>ชื่อผู้เล่น</label><input id="name" maxlength="20" placeholder="ชื่อของคุณ"></div>
+      <div><label>รหัสห้อง</label><input id="code" maxlength="6" placeholder="เช่น A1B2C3"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="create">สร้างห้อง</button>
+      <button id="join" class="secondary">เข้าห้อง</button>
+    </div>
+    <p id="err" class="status" style="color:#ff8d8d"></p>
+  </section>
+
+  <section id="game" class="hidden">
+    <div class="panel">
+      <div class="row" style="align-items:center">
+        <div><b>ห้อง: <span id="room"></span></b><div class="muted">แชร์รหัสนี้ให้เพื่อน</div></div>
+        <button id="flip">คว่ำบอร์ด 🙈</button>
+        <button id="shake" class="secondary">เขย่า 🎲</button>
+      </div>
+      <div id="players" class="players"></div>
+      <div id="boards"></div>
+    </div>
+  </section>
+</div>
+<script>
+const $=s=>document.querySelector(s);
+let ws,myId,myRoom,state;
+const faces=["","⚀","⚁","⚂","⚃","⚄","⚅"];
+
+function connect(){
+  ws=new WebSocket(location.origin.replace(/^http/,"ws"));
+  ws.onmessage=e=>{
+    const m=JSON.parse(e.data);
+    if(m.type==="error") $("#err").textContent=m.message;
+    if(m.type==="state"){state=m.state;myRoom=m.state.code;render();}
+  };
+  ws.onclose=()=>$("#err").textContent="การเชื่อมต่อหลุด ลองรีเฟรชหน้า";
+}
+function send(o){if(ws?.readyState===1)ws.send(JSON.stringify(o))}
+function name(){return $("#name").value.trim()||"ผู้เล่น"}
+$("#create").onclick=()=>{connect();setTimeout(()=>send({type:"create",name:name()}),150)};
+$("#join").onclick=()=>{connect();setTimeout(()=>send({type:"join",code:$("#code").value,name:name()}),150)};
+$("#flip").onclick=()=>send({type:"flip"});
+$("#shake").onclick=()=>send({type:"shake"});
+
+function render(){
+  $("#lobby").classList.add("hidden");$("#game").classList.remove("hidden");$("#room").textContent=state.code;
+  const me=state.players.find(p=>p.id===myId)||state.players[0];
+  if(!myId && me)myId=me.id;
+  const self=state.players.find(p=>p.id===myId);
+  $("#flip").textContent=self?.faceUp?"คว่ำบอร์ด 🙈":"หงายบอร์ด 👀";
+  $("#players").innerHTML=state.players.map(p=>`<div class="playerCard ${p.id===myId?'me':''}"><b>${escapeHtml(p.name)}</b><small>${p.faceUp?'👀 หงาย':'🙈 คว่ำ'}</small></div>`).join("");
+  $("#boards").innerHTML=state.players.map(p=>boardHTML(p)).join("");
+  state.players.forEach(p=>bindDice(p));
+}
+function boardHTML(p){
+  const mine=p.id===myId, canSee=mine||p.faceUp;
+  const dice=canSee&&p.dice?p.dice:[null,null,null,null,null];
+  return `<div style="margin-top:16px"><b>${escapeHtml(p.name)} ${mine?"(คุณ)":""}</b>
+    <div class="board ${p.faceUp?'':'down'}" id="board-${p.id}">
+      ${dice.map((v,i)=>`<div class="die" data-owner="${p.id}" data-i="${i}" style="left:${p.positions?.[i]?.x??20+i*15}%;top:${p.positions?.[i]?.y??30}%">${v?faces[v]:""}</div>`).join("")}
+      ${!canSee?'<div class="cover">🔒</div>':""}
+    </div></div>`;
+}
+function bindDice(p){
+  if(p.id!==myId)return;
+  document.querySelectorAll(`[data-owner="${p.id}"]`).forEach(el=>{
+    let dragging=false;
+    el.onpointerdown=e=>{dragging=true;el.setPointerCapture(e.pointerId)};
+    el.onpointermove=e=>{
+      if(!dragging)return;
+      const b=el.parentElement.getBoundingClientRect();
+      const x=Math.max(5,Math.min(95,(e.clientX-b.left)/b.width*100));
+      const y=Math.max(8,Math.min(92,(e.clientY-b.top)/b.height*100));
+      el.style.left=x+"%";el.style.top=y+"%";
+    };
+    el.onpointerup=e=>{
+      if(!dragging)return;dragging=false;
+      const b=el.parentElement.getBoundingClientRect();
+      send({type:"move",index:Number(el.dataset.i),x:(e.clientX-b.left)/b.width*100,y:(e.clientY-b.top)/b.height*100});
+    };
+  });
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+</script>
+</body>
+</html>
