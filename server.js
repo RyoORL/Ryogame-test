@@ -48,7 +48,7 @@ function publicState(room, viewerId) {
 function sendState(room) {
   for (const p of room.players.values()) {
     if (p.ws?.readyState === 1)
-      p.ws.send(JSON.stringify({type:"state", state:publicState(room,p.id)}));
+      p.ws.send(JSON.stringify({type:"state", selfId:p.id, state:publicState(room,p.id)}));
   }
 }
 
